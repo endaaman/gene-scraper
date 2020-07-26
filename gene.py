@@ -17,13 +17,15 @@ Entrez.email = 'endaaman@eis.hokudai.ac.jp'
 # 本当は argparse を使って python gene.py --file hoge.xlsx とかでファイルをしているするけど
 # ごちゃごちゃになるので頭に定数として定義しておく
 # ここをいじるだけで全体の挙動を調節できるようにする
+
+# 読み取るエクセルファイルの最初と最後
 YEAR_RANGE = [2001, 2019]
+# 追加検索ワード
 GENE_LIST = ['A2M', 'CGNL1', 'BAALC', 'RNF112', 'TMTC1', 'GPR37L1', 'SLC4A4', 'CXCL12', 'RGS2', 'EGR1', 'LRRC73']
+# 追加検索ワード
 ADDITINAL_WORDS = ['meningioma']
 DATE_RANGE = ['2001/01/01', '2020/07/26']
 
-
-YEARS = [str(y) for y in list(range(*YEAR_RANGE))]
 
 
 # 何度も同じルールで書き換えるので関数にしておく
@@ -35,8 +37,9 @@ def tokenize(s):
 
 # namedtupleは変更がなくメソッドを持たいない純粋に複数のデータを入れるのに便利
 # 配列のようにもクラスのようにも扱える
-#   r = SearchResult('PRB2', 10, ['123', '456'])
-#   print(r.count)
+#   Hoge = namedtuple('Hoge', ['fuga', 'piyo'])
+#   hoge = Hoge(123, 'foo')
+#   print(hoge.fuga, hoge.piyo)
 # みたいに使える
 JounalInfo = namedtuple('JounalInfo', ['year', 'title', 'iso', 'issn', 'impact_factor', 'raw_title', 'raw_iso'])
 
@@ -66,8 +69,7 @@ class JournalListByYear:
         # 行ごとに読み込む
         for row in target_sheet.rows:
             # リスト内包表記で6番目までのcellのvalueの配列にして、分割代入で変数に展開
-            values = [cell.value for cell in row[:6]]
-            rank, title, iso, issn, cites, imp = values
+            rank, title, iso, issn, cites, imp = [cell.value for cell in row[:6]]
             # rankが数字のときだけ有効な行と見做す
             if not isinstance(rank, int):
                 continue
@@ -103,8 +105,11 @@ class JournalListByYear:
 
 class JournalLists:
     def __init__(self, years):
+        # int連番を作って内包表記で全部strに変換する
+        years = [str(y) for y in list(range(*YEAR_RANGE))]
+
         # 年ごとのエクセルファイルを一個ずつ読み取る
-        self.lists = [JournalListByYear(year) for year in YEARS]
+        self.lists = [JournalListByYear(year) for year in years]
         print('All sheets loaded')
 
     # その年のジャーナル一覧から title と iso と issn で検索し、ジャーナル情報とマッチした条件を返す
@@ -185,12 +190,15 @@ def search_pubmed_by_gene(gene_list, additinal_words):
     return results
 
 
-# ここまではパーツを用意する処理。ここから下でそれらを使いながら実際の読み取り作業を開始する
+
+
+# 〜〜〜ここまではパーツを用意する処理。ここから下でそれらを使いながら実際の読み取りしていく 〜〜〜
+
+
 
 
 # エクセルファイルを読みはじめる
 journal_lists = JournalLists(YEARS)
-
 
 print(f'Additinal words: {ADDITINAL_WORDS}')
 
@@ -214,7 +222,7 @@ OutputRow = namedtuple('OutputRow', [
     'url',
 ])
 
-# 遺伝子名をキーとして、出力する行の配列とそのインパクトの和のdict
+# 遺伝子名をキーとして、出力する行の配列とそのインパクトファクターの和のdict
 rows_and_if_by_gene = {}
 
 for search_result in search_results:
@@ -270,14 +278,13 @@ ws.append([
     'URL',
 ])
 
-
 for search_result in search_results:
     # 配列を変数に展開
     [rows, impact_factor] = rows_and_if_by_gene[search_result.gene]
 
     # geneごとの見出し行
     ws.append([
-        search_result.needle,  # 'Search word',
+        search_result.needle, # 'Search word',
         search_result.count,  # 'Hit No.',
         '',  # 'Article title',
         '',  # 'Year',
@@ -302,4 +309,3 @@ for search_result in search_results:
         ])
 
 wb.save(filename='output.xlsx')
-
