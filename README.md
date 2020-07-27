@@ -1,3 +1,3 @@
 ```
-$ pip install biopython openpyxl
+$ pip install biopython openpyxl tqdm
 ```

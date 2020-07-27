@@ -3,6 +3,7 @@ from collections import namedtuple
 import string
 
 # pipで後から入れたものは後に置く
+from tqdm import tqdm
 import openpyxl
 from openpyxl import Workbook
 from Bio import Entrez
@@ -19,14 +20,24 @@ Entrez.email = 'endaaman@eis.hokudai.ac.jp'
 # ここをいじるだけで全体の挙動を調節できるようにする
 
 # 読み取るエクセルファイルの最初と最後
-YEAR_RANGE = [2001, 2019]
+# YEAR_RANGE = [2001, 2020]
+YEAR_RANGE = [2018, 2020]
+
+# 検索ワード
+# GENE_LIST = ['A2M', 'CGNL1', 'BAALC', 'RNF112', 'TMTC1', 'GPR37L1', 'SLC4A4', 'CXCL12', 'RGS2', 'EGR1', 'LRRC73']
+GENE_LIST = ['A2M', 'CGNL1', 'BAALC', 'RNF112', 'TMTC1', 'GPR37L1', 'SLC4A4']
+
 # 追加検索ワード
-GENE_LIST = ['A2M', 'CGNL1', 'BAALC', 'RNF112', 'TMTC1', 'GPR37L1', 'SLC4A4', 'CXCL12', 'RGS2', 'EGR1', 'LRRC73']
-# 追加検索ワード
-ADDITINAL_WORDS = ['meningioma']
+ADDITINAL_WORDS = ['cancer', 'stem']
+# ADDITINAL_WORDS = ['meningioma']
+
+# 検索範囲
 DATE_RANGE = ['2001/01/01', '2020/07/26']
 
 
+
+# int連番を作って内包表記で全部strに変換する
+YEARS = [str(y) for y in list(range(*YEAR_RANGE))]
 
 # 何度も同じルールで書き換えるので関数にしておく
 def tokenize(s):
@@ -41,7 +52,7 @@ def tokenize(s):
 #   hoge = Hoge(123, 'foo')
 #   print(hoge.fuga, hoge.piyo)
 # みたいに使える
-JounalInfo = namedtuple('JounalInfo', ['year', 'title', 'iso', 'issn', 'impact_factor', 'raw_title', 'raw_iso'])
+JournalInfo = namedtuple('JournalInfo', ['year', 'title', 'iso', 'issn', 'impact_factor', 'raw_title', 'raw_iso'])
 
 # classは大文字ではじめる(HogeFuga など)
 # またあまりにも一般的な名前にするとかぶるのでできるだけ自明な名前にする
@@ -75,7 +86,7 @@ class JournalListByYear:
                 continue
 
             # 行情報をtokenizeしながら、上で用意したJournalInfoとして作成して配列に収める
-            self.journals.append(JounalInfo(
+            self.journals.append(JournalInfo(
                 year=year,
                 title=tokenize(title) if title else '', # 空白で埋める
                 iso=tokenize(iso) if title else '', # 空白で埋める
@@ -85,18 +96,21 @@ class JournalListByYear:
                 raw_iso=iso,
             ))
 
-        print(f'Loaded {filename}.')
+        print(f'Loaded {filename} ({len(self.journals)})')
+
+    def compare(self, a, b):
+        return a != '' and b != '' and a == b
 
     # その年のジャーナル一覧から title と iso と issn で検索し、ジャーナル情報とマッチした条件を返す
     def match(self, title, iso, issn):
         for journal in self.journals:
-            if issn == journal.issn:
+            if self.compare(issn, journal.issn):
                 return journal, 'issn'
 
-            if iso == journal.iso:
+            if self.compare(iso, journal.iso):
                 return journal, 'iso'
 
-            if title == journal.title:
+            if self.compare(title, journal.title):
                 return journal, 'title'
 
         # 見つからなければここまで落ちてくる
@@ -105,9 +119,6 @@ class JournalListByYear:
 
 class JournalLists:
     def __init__(self, years):
-        # int連番を作って内包表記で全部strに変換する
-        years = [str(y) for y in list(range(*YEAR_RANGE))]
-
         # 年ごとのエクセルファイルを一個ずつ読み取る
         self.lists = [JournalListByYear(year) for year in years]
         print('All sheets loaded')
@@ -132,43 +143,43 @@ class ArticleData:
     def __init__(self, data):
         self.data = data
 
+    # a['hoge']['fuga']['piyo'] とアクセスするとKeyErrorが補足できないので、
+    # 安全に階層を下るためのヘルパー関数を用意する
+    def get_recursively(self, element, keys, default_value=None):
+        # 0からキー配列を探索開始
+        i = 0
+        e = element
+        while i < len(keys):
+            # 現在のキーを取得
+            key = keys[i]
+            try:
+                # 現在のキーの値を取得
+                e = e[key]
+            except KeyError:
+                # 現在のキーの値がなければその時点で脱出
+                return default_value
+            # 配列にも使えるように
+            except IndexError:
+                return default_value
+            i += 1
+
+        # 最後まで抜けて来られれば最後に取得した値が、最後のキーに対応する値になる
+        return e
+
     def get_title(self):
         return self.data.get('ArticleTitle', '')
 
     def get_year(self):
-        # read year
-        year = None
-        try:
-            year = self.data['Journal']['JournalIssue']['PubDate']['MedlineDate']
-        except:
-            try:
-                year = self.data['Journal']['JournalIssue']['PubDate']['Year']
-            except:
-                return ''
-        return str(year)[:4]
+        return self.get_recursively(self.data, ['ArticleDate', 0, 'Year'], '')
 
     def get_journal_issn(self):
-        try:
-            issn = article_data['Journal']['ISSN']
-        except:
-            return ''
-        return str(issn)
+        return self.get_recursively(self.data, ['Journal', 'ISSN'], '')
 
     def get_journal_title(self):
-        journal_title = None
-        try:
-            al_title_data = article_data['Journal']['Title']
-        except:
-            return ''
-        return str(journal_title)
+        return self.get_recursively(self.data, ['Journal', 'Title'], '')
 
     def get_journal_iso(self):
-        iso = None
-        try:
-            iso = article_data['Journal']['ISOAbbreviation']
-        except:
-            return ''
-        return str(iso_abbr_data)
+        return self.get_recursively(self.data, ['Journal', 'ISOAbbreviation'], '')
 
 # 検索結果（遺伝子 実際の検索語句 ヒット数 論文ID配列）を格納する
 SearchResult = namedtuple('SearchResult', ['gene', 'needle', 'count', 'ids'])
@@ -206,19 +217,28 @@ print(f'Additinal words: {ADDITINAL_WORDS}')
 search_results = search_pubmed_by_gene(GENE_LIST, ADDITINAL_WORDS)
 
 # ヒット数を表示
+total_count = 0
 for v in search_results:
+    total_count += int(v.count)
     print(f'[{v.gene}]: {v.count}')
+
+
+answer = input(f'estimated time {total_count//60}min (1s/itr). OK to start search?(y/n) ')
+if answer[0] != 'y':
+    exit(1)
 
 
 # 出力する行のデータ(論文ごとの)
 OutputRow = namedtuple('OutputRow', [
     'article_title',
+    'pubmed_id',
     'year',
     'journal_title',
     'journal_iso',
+    'journal_issn',
     'journal_year',
     'journal_impact_factor',
-    'pubmed_id',
+    'match_condition',
     'url',
 ])
 
@@ -231,7 +251,7 @@ for search_result in search_results:
     impact_factor = 0.0
 
     # id は予約語なので避ける
-    for _id in search_result.ids:
+    for _id in tqdm(search_result.ids):
         handle = Entrez.efetch(db='pubmed', id=_id, retmode='xml')
         xml_data = Entrez.read(handle)
 
@@ -240,24 +260,32 @@ for search_result in search_results:
 
         # エクセルのデータの配列を持ってるクラスの検索関数を呼ぶ
         # 上で関数にまとめたので細かいことを気にせずジャーナルのタイトルとか読み取って引数にできる
-        journal_info, match_confition = journal_lists.match(
-            tokenize(article_data.get_journal_title()),
-            tokenize(article_data.get_journal_iso()),
-            article_data.get_journal_issn(),
+        article_journal_title = article_data.get_journal_title()
+        article_journal_iso = article_data.get_journal_iso()
+        article_journal_issn = article_data.get_journal_issn()
+
+        journal_info, match_condition = journal_lists.match(
+            tokenize(article_journal_title),
+            tokenize(article_journal_iso),
+            article_journal_issn,
         )
 
         rows.append(OutputRow(
             article_data.get_title(),
-            article_data.get_year(),
-            journal_info.raw_title,
-            journal_info.raw_iso,
-            journal_info.year,
-            journal_info.impact_factor,
             _id,
+            article_data.get_year(),
+            # ジャーナ一覧の一致があればそのタイトルを使う。なければ論文データについてるジャーナル名で埋めておく
+            journal_info.raw_title if journal_info else article_journal_title,
+            journal_info.raw_iso if journal_info else article_journal_iso,
+            journal_info.issn if journal_info else article_journal_issn,
+            journal_info.year if journal_info else '',
+            journal_info.impact_factor if journal_info else 0.0,
+            match_condition,
             f'https://pubmed.ncbi.nlm.nih.gov/{_id}/',
         ))
 
-        impact_factor += float(journal_info.impact_factor)
+        if journal_info:
+            impact_factor += float(journal_info.impact_factor)
 
     rows_and_if_by_gene[search_result.gene] = [rows, impact_factor]
 
@@ -268,13 +296,15 @@ ws = wb.active
 # ヘッダ
 ws.append([
     'Search word',
-    'Hit No.',
+    'Hit count',
     'Article title',
-    'Year',
-    'Full journal title',
-    'J. abbrev.',
-    'Impact factor',
     'PubMed ID',
+    'Year',
+    'Journal title',
+    'Journal abbr',
+    'Journal issn',
+    'Impact factor',
+    'Match condition',
     'URL',
 ])
 
@@ -285,11 +315,12 @@ for search_result in search_results:
     # geneごとの見出し行
     ws.append([
         search_result.needle, # 'Search word',
-        search_result.count,  # 'Hit No.',
+        search_result.count,  # 'Hit count',
         '',  # 'Article title',
+        '',  # 'PubMed ID',
         '',  # 'Year',
-        '',  # 'Full journal title',
-        '',  # 'J. abbrev.',
+        '',  # 'Journal title',
+        '',  # 'Journal abbr',
         impact_factor,  # 'Impact factor',
         '',  # 'PubMed ID',
         '',  # 'URL',
@@ -300,11 +331,13 @@ for search_result in search_results:
             '',  # 'Search word',
             '',  # 'Hit No.',
             row.article_title,  # 'Article title',
-            row.journal_year,  # 'Year',
-            row.journal_title,  # 'Full journal title',
-            row.journal_iso,  # 'J. abbrev.',
-            row.journal_impact_factor,  # 'Impact factor',
             row.pubmed_id,  # 'PubMed ID',
+            row.year,  # 'Year',
+            row.journal_title,  # 'Journal title',
+            row.journal_iso,  # 'Journal abbr',
+            row.journal_issn,  # 'Journal issn',
+            row.journal_impact_factor,  # 'Impact factor',
+            row.match_condition,  # 'Match condition',
             row.url,  # 'URL',
         ])
 
