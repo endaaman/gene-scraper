@@ -187,13 +187,13 @@ SearchResult = namedtuple('SearchResult', ['gene', 'needle', 'count', 'ids'])
 # 遺伝子名と追加の語句を合体させながら検索して、検索結果をSearchResultの配列で返す
 def search_pubmed_by_gene(gene_list, additinal_words):
     results = []
-    for gene in GENE_LIST:
+    for gene in gene_list:
         # AND区切りの検索ワードを作る
-        # 1. join()関数: ','.join(['A', 'B', 'C') -> 'A,B,C'
+        # 1. join()関数: ','.join(['A', 'B', 'C']) -> 'A,B,C'
         # 2. * はリストを引数やリストの要素展開する。下の省略表現
         #    'AND'.join([gene, ADDITINAL_WORDS[0], ADDITINAL_WORDS[1]])
         # 3. 検索ワードには慣習的に needle という名前が使用される
-        needle = ' AND '.join([gene, *ADDITINAL_WORDS])
+        needle = ' AND '.join([gene, *additinal_words])
         handle = Entrez.esearch(db='pubmed', term=needle, mindate=DATE_RANGE[0], maxdate=DATE_RANGE[1], retmax=100000)
         record = Entrez.read(handle)
         # 遺伝子名をキー、ヒット数を値としたdict
@@ -224,7 +224,7 @@ for v in search_results:
 
 
 answer = input(f'estimated time {total_count//60}min (1s/itr). OK to start search?(y/n) ')
-if answer[0] != 'y':
+if len(answer) > 0 and answer[0] == 'n':
     exit(1)
 
 
@@ -341,4 +341,4 @@ for search_result in search_results:
             row.url,  # 'URL',
         ])
 
-wb.save(filename='output.xlsx')
+wb.save(filename=OUTPUT_FILE)
