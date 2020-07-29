@@ -25,10 +25,10 @@ YEAR_RANGE = [2018, 2020]
 
 # 検索ワード
 # GENE_LIST = ['A2M', 'CGNL1', 'BAALC', 'RNF112', 'TMTC1', 'GPR37L1', 'SLC4A4', 'CXCL12', 'RGS2', 'EGR1', 'LRRC73']
-GENE_LIST = ['A2M', 'CGNL1', 'BAALC', 'RNF112', 'TMTC1', 'GPR37L1', 'SLC4A4']
+GENE_LIST = ['NPWT']
 
 # 追加検索ワード
-ADDITINAL_WORDS = ['cancer', 'stem']
+ADDITINAL_WORDS = ['negative', 'pressure', 'wound', 'therapy']
 # ADDITINAL_WORDS = ['meningioma']
 
 # 検索範囲
@@ -39,12 +39,44 @@ DATE_RANGE = ['2001/01/01', '2020/07/26']
 # int連番を作って内包表記で全部strに変換する
 YEARS = [str(y) for y in list(range(*YEAR_RANGE))]
 
+def is_float(s):
+    try:
+        float(s)
+        return True
+    except ValueError:
+        pass
+    return False
+
 # 何度も同じルールで書き換えるので関数にしておく
 def tokenize(s):
     s = s.translate(str.maketrans('', '', string.punctuation))
     s = s.replace(' ', '')
     s = s.lower()
     return s
+
+
+# a['hoge']['fuga']['piyo'] とアクセスするとKeyErrorが補足できないので、
+# 安全に階層を下るためのヘルパー関数を用意する
+def get_recursively(element, keys, default_value=None):
+    # 0からキー配列を探索開始
+    i = 0
+    e = element
+    while i < len(keys):
+        # 現在のキーを取得
+        key = keys[i]
+        try:
+            # 現在のキーの値を取得
+            e = e[key]
+        except KeyError:
+            # 現在のキーの値がなければその時点で脱出
+            return default_value
+        # 配列にも使えるように
+        except IndexError:
+            return default_value
+        i += 1
+
+    # 最後まで抜けて来られれば最後に取得した値が、最後のキーに対応する値になる
+    return e
 
 # namedtupleは変更がなくメソッドを持たいない純粋に複数のデータを入れるのに便利
 # 配列のようにもクラスのようにも扱える
@@ -143,43 +175,20 @@ class ArticleData:
     def __init__(self, data):
         self.data = data
 
-    # a['hoge']['fuga']['piyo'] とアクセスするとKeyErrorが補足できないので、
-    # 安全に階層を下るためのヘルパー関数を用意する
-    def get_recursively(self, element, keys, default_value=None):
-        # 0からキー配列を探索開始
-        i = 0
-        e = element
-        while i < len(keys):
-            # 現在のキーを取得
-            key = keys[i]
-            try:
-                # 現在のキーの値を取得
-                e = e[key]
-            except KeyError:
-                # 現在のキーの値がなければその時点で脱出
-                return default_value
-            # 配列にも使えるように
-            except IndexError:
-                return default_value
-            i += 1
-
-        # 最後まで抜けて来られれば最後に取得した値が、最後のキーに対応する値になる
-        return e
-
     def get_title(self):
         return self.data.get('ArticleTitle', '')
 
     def get_year(self):
-        return self.get_recursively(self.data, ['ArticleDate', 0, 'Year'], '')
+        return get_recursively(self.data, ['ArticleDate', 0, 'Year'], '')
 
     def get_journal_issn(self):
-        return self.get_recursively(self.data, ['Journal', 'ISSN'], '')
+        return get_recursively(self.data, ['Journal', 'ISSN'], '')
 
     def get_journal_title(self):
-        return self.get_recursively(self.data, ['Journal', 'Title'], '')
+        return get_recursively(self.data, ['Journal', 'Title'], '')
 
     def get_journal_iso(self):
-        return self.get_recursively(self.data, ['Journal', 'ISOAbbreviation'], '')
+        return get_recursively(self.data, ['Journal', 'ISOAbbreviation'], '')
 
 # 検索結果（遺伝子 実際の検索語句 ヒット数 論文ID配列）を格納する
 SearchResult = namedtuple('SearchResult', ['gene', 'needle', 'count', 'ids'])
@@ -208,11 +217,6 @@ def search_pubmed_by_gene(gene_list, additinal_words):
 
 
 
-# エクセルファイルを読みはじめる
-journal_lists = JournalLists(YEARS)
-
-print(f'Additinal words: {ADDITINAL_WORDS}')
-
 # 検索する
 search_results = search_pubmed_by_gene(GENE_LIST, ADDITINAL_WORDS)
 
@@ -222,10 +226,14 @@ for v in search_results:
     total_count += int(v.count)
     print(f'[{v.gene}]: {v.count}')
 
-
 answer = input(f'estimated time {total_count//60}min (1s/itr). OK to start search?(y/n) ')
 if len(answer) > 0 and answer[0] == 'n':
     exit(1)
+
+# エクセルファイルを読みはじめる
+journal_lists = JournalLists(YEARS)
+
+print(f'Additinal words: {ADDITINAL_WORDS}')
 
 
 # 出力する行のデータ(論文ごとの)
@@ -256,7 +264,10 @@ for search_result in search_results:
         xml_data = Entrez.read(handle)
 
         # xmlのまま扱うとごちゃごちゃにになるので上で作ったクラスを経由する
-        article_data = ArticleData(xml_data['PubmedArticle'][0]['MedlineCitation']['Article'])
+        data = get_recursively(xml_data, ['PubmedArticle', 0, 'MedlineCitation', 'Article'])
+        if not data:
+            continue
+        article_data = ArticleData(data)
 
         # エクセルのデータの配列を持ってるクラスの検索関数を呼ぶ
         # 上で関数にまとめたので細かいことを気にせずジャーナルのタイトルとか読み取って引数にできる
@@ -284,7 +295,7 @@ for search_result in search_results:
             f'https://pubmed.ncbi.nlm.nih.gov/{_id}/',
         ))
 
-        if journal_info:
+        if journal_info and is_float(journal_info.impact_factor):
             impact_factor += float(journal_info.impact_factor)
 
     rows_and_if_by_gene[search_result.gene] = [rows, impact_factor]
